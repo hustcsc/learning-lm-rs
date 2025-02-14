@@ -1,3 +1,7 @@
+use std::vec;
+
+use serde::de;
+
 use crate::tensor::Tensor;
 
 // get (row) vectors from a 2D table given a list of indices
@@ -71,19 +75,36 @@ pub fn masked_softmax(y: &mut Tensor<f32>) {
 }
 
 pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: f32) {
-    todo!("实现 rms_norm，计算前做一些必要的检查会帮助你后续调试")
+    let mut offset = 0;
+    while offset + w.size() <= x.size() {
+        let _x_slice = x.slice(offset, w.shape());
+        let mut _y_slice = y.slice(offset, w.shape());
+
+        let _y_slice_data = unsafe {_y_slice.data_mut()};
+        let _x_slice_data = _x_slice.data();
+
+        let len = _y_slice_data.len();
+
+        let denominator = (dot(&_x_slice, &_x_slice) / (len as f32) + epsilon).sqrt();
+        for i in 0..len {
+            _y_slice_data[i] = w.data()[i] * _x_slice_data[i] / denominator;
+        }
+        offset += w.size();
+    }
 }
 
 // y = silu(x) * y
 // hint: this is an element-wise operation
 pub fn swiglu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
-    // let len = y.size();
-    // assert!(len == x.size());
+    let len = y.size();
+    assert!(len == x.size());
 
-    // let _y = unsafe { y.data_mut() };
-    // let _x = x.data();
+    let _y = unsafe { y.data_mut() };
+    let _x = x.data();
 
-    todo!("实现 silu，这里给了一些前期准备工作的提示，你可以参考")
+    for i in 0..len {
+        _y[i] = _x[i] / (1.0 + (-_x[i]).exp()) * _y[i];
+    }
 }
 
 // C = beta * C + alpha * A @ B^T
