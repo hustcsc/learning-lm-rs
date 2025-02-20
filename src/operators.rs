@@ -74,8 +74,6 @@ pub fn masked_softmax(y: &mut Tensor<f32>) {
     }
 }
 
-
-
 pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: f32) {
     let mut offset = 0;
     while offset + w.size() <= x.size() {
