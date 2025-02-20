@@ -85,7 +85,7 @@ pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: 
 
         let len = _y_slice_data.len();
 
-        let denominator = (dot(&_x_slice, &_x_slice) / (len as f32) + epsilon).sqrt();
+        let denominator: f32 = (dot(&_x_slice, &_x_slice) / (len as f32) + epsilon).sqrt();
         for i in 0..len {
             _y_slice_data[i] = w.data()[i] * _x_slice_data[i] / denominator;
         }
@@ -110,8 +110,37 @@ pub fn swiglu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
 // C = beta * C + alpha * A @ B^T
 // hint: You don't need to do an explicit transpose of B
 pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
-    todo!("实现 matmul_transb，计算前做一些必要的检查会帮助你后续调试");
+    // todo!("实现 matmul_transb，计算前做一些必要的检查会帮助你后续调试");
+
+    // a (m,k) b (n,k) c (m,n)
+    assert_eq!(a.shape()[1], b.shape()[1], "矩阵a,b乘法的维度不匹配");  
+    assert_eq!(c.shape()[0], a.shape()[0], "矩阵a,c乘法的维度不匹配");
+    assert_eq!(c.shape()[1], b.shape()[0], "矩阵b,c乘法的维度不匹配");
+    // let b_t = b.transpose();
+    let c_data = unsafe { c.data_mut() };
+    let a_data = a.data();
+    let b_data = b.data();
+    let m = a.shape()[0];
+    let n = b.shape()[0];
+    let k = a.shape()[1];
+    // a (m,k) b (n,k) c (m,n)
+    // 遍历 C 的每个元素
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = 0.0;
+
+            // 计算 A[i, :] * B[j, :]^T
+            for l in 0..k {
+                sum += a_data[i * k + l] * b_data[j * k + l];
+            }
+
+            // 更新 C[i, j]
+            let index = i * n + j;
+            c_data[index] = alpha * sum + beta * c_data[index];
+        }
+    }
 }
+
 
 // Dot product of two tensors (treated as vectors)
 #[allow(unused)]
@@ -230,3 +259,30 @@ fn test_matmul_transb() {
         1e-3
     ));
 }
+
+// #[test]
+// fn test_gather() {
+//     // 创建一个示例 table 张量
+//     let table = Tensor::<f32>::new(
+//         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+//         &vec![2, 4],
+//     );
+
+//     // 创建一个示例 indices 张量
+//     let indices = Tensor::<u32>::new(vec![1, 0], &vec![2]);
+
+//     // 创建一个空的 y 张量，用于存储结果
+//     let mut y = Tensor::<f32>::new(vec![0.0; 8], &vec![2, 4]);
+
+//     // 调用 gather 函数
+//     gather(&mut y, &indices, &table);
+
+//     // 预期结果
+//     let expected = Tensor::<f32>::new(
+//         vec![5.0, 6.0, 7.0, 8.0, 1.0, 2.0, 3.0, 4.0],
+//         &vec![2, 4],
+//     );
+
+//     // 验证结果是否符合预期
+//     assert!(y.close_to(&expected, 1e-3));
+// }

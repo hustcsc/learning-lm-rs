@@ -4,8 +4,10 @@ use std::vec;
 use crate::config::LlamaConfigJson;
 use crate::kvcache::KVCache;
 use crate::operators as OP;
+use crate::operators::*;
 use crate::params::LLamaParams;
 use crate::tensor::Tensor;
+
 use safetensors::SafeTensors;
 use std::path::Path;
 pub struct Llama<T> {
@@ -167,7 +169,15 @@ fn mlp(
     rms_w: &Tensor<f32>,
     eps: f32,
 ) {
-    todo!("Implement mlp");
+    // todo!("Implement mlp");
+    rms_norm(hidden_states, residual, rms_w, eps);
+    matmul_transb(gate,0., hidden_states, w_gate, 1.);
+    matmul_transb(up, 0., hidden_states,w_up, 1.);
+    swiglu(up, gate);
+    matmul_transb(residual,1.,up,w_down,1.);
+
+
+
 }
 
 #[test]
