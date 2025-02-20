@@ -1,7 +1,5 @@
 use std::vec;
-
 use serde::de;
-
 use crate::tensor::Tensor;
 
 // get (row) vectors from a 2D table given a list of indices
