@@ -1,3 +1,5 @@
+use std::vec;
+use serde::de;
 use crate::tensor::Tensor;
 
 // get (row) vectors from a 2D table given a list of indices
@@ -13,7 +15,6 @@ pub fn gather(y: &mut Tensor<f32>, indices: &Tensor<u32>, table: &Tensor<f32>) {
         dst.copy_from_slice(src);
     }
 }
-
 // RoPE: Rotary Positional Embedding
 pub fn rope(y: &mut Tensor<f32>, start_pos: usize, theta: f32) {
     let shape = y.shape();
@@ -71,26 +72,72 @@ pub fn masked_softmax(y: &mut Tensor<f32>) {
 }
 
 pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: f32) {
-    todo!("实现 rms_norm，计算前做一些必要的检查会帮助你后续调试")
+    let mut offset = 0;
+    while offset + w.size() <= x.size() {
+        let _x_slice = x.slice(offset, w.shape());
+        let mut _y_slice = y.slice(offset, w.shape());
+
+        let _y_slice_data = unsafe {_y_slice.data_mut()};
+        let _x_slice_data = _x_slice.data();
+
+        let len = _y_slice_data.len();
+
+        let denominator: f32 = (dot(&_x_slice, &_x_slice) / (len as f32) + epsilon).sqrt();
+        for i in 0..len {
+            _y_slice_data[i] = w.data()[i] * _x_slice_data[i] / denominator;
+        }
+        offset += w.size();
+    }
 }
 
-// y = sigmoid(y) * y * x
+// y = silu(x) * y
 // hint: this is an element-wise operation
-pub fn silu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
-    // let len = y.size();
-    // assert!(len == x.size());
+pub fn swiglu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
+    let len = y.size();
+    assert!(len == x.size());
 
-    // let _y = unsafe { y.data_mut() };
-    // let _x = x.data();
+    let _y = unsafe { y.data_mut() };
+    let _x = x.data();
 
-    todo!("实现 silu，这里给了一些前期准备工作的提示，你可以参考")
+    for i in 0..len {
+        _y[i] = _x[i] / (1.0 + (-_x[i]).exp()) * _y[i];
+    }
 }
 
 // C = beta * C + alpha * A @ B^T
 // hint: You don't need to do an explicit transpose of B
 pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
-    todo!("实现 matmul_transb，计算前做一些必要的检查会帮助你后续调试");
+    // todo!("实现 matmul_transb，计算前做一些必要的检查会帮助你后续调试");
+
+    // a (m,k) b (n,k) c (m,n)
+    assert_eq!(a.shape()[1], b.shape()[1], "矩阵a,b乘法的维度不匹配");  
+    assert_eq!(c.shape()[0], a.shape()[0], "矩阵a,c乘法的维度不匹配");
+    assert_eq!(c.shape()[1], b.shape()[0], "矩阵b,c乘法的维度不匹配");
+    // let b_t = b.transpose();
+    let c_data = unsafe { c.data_mut() };
+    let a_data = a.data();
+    let b_data = b.data();
+    let m = a.shape()[0];
+    let n = b.shape()[0];
+    let k = a.shape()[1];
+    // a (m,k) b (n,k) c (m,n)
+    // 遍历 C 的每个元素
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = 0.0;
+
+            // 计算 A[i, :] * B[j, :]^T
+            for l in 0..k {
+                sum += a_data[i * k + l] * b_data[j * k + l];
+            }
+
+            // 更新 C[i, j]
+            let index = i * n + j;
+            c_data[index] = alpha * sum + beta * c_data[index];
+        }
+    }
 }
+
 
 // Dot product of two tensors (treated as vectors)
 #[allow(unused)]
@@ -176,7 +223,7 @@ pub fn random_sample(x: &Tensor<f32>, top_p: f32, top_k: u32, temperature: f32) 
 fn test_silu() {
     let mut y = Tensor::<f32>::new(vec![2., 3., 4.], &vec![1, 3]);
     let x = Tensor::<f32>::new(vec![1., 2., 3.], &vec![1, 3]);
-    silu(&mut y, &x);
+    swiglu(&mut y, &x);
     assert!(y.close_to(
         &Tensor::<f32>::new(vec![1.4621172, 5.2847824, 11.43089], &vec![1, 3]),
         1e-3
@@ -209,3 +256,73 @@ fn test_matmul_transb() {
         1e-3
     ));
 }
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+pub fn matmul_transb_avx(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
+    let a_shape = a.shape();
+    let b_shape = b.shape();
+    let (i, j, k) = (a_shape[0], b_shape[0], a_shape[1]);
+
+    let _c = unsafe { c.data_mut() };
+    let _a = a.data();
+    let _b = b.data();
+
+    if is_x86_feature_detected!("avx2") && k % 8 == 0 {
+        unsafe {
+            for x in 0..i {
+                for y in 0..j {
+                    let mut sum_vec = _mm256_setzero_ps();
+                    for z in (0..k).step_by(8) {
+                        let a_vec = _mm256_loadu_ps(_a.as_ptr().add(x * k + z));
+                        let b_vec = _mm256_loadu_ps(_b.as_ptr().add(y * k + z));
+                        sum_vec   = _mm256_fmadd_ps(a_vec, b_vec, sum_vec);
+                    }
+                    let mut sum_arr = [0.0; 8];
+                    _mm256_storeu_ps(sum_arr.as_mut_ptr(), sum_vec);
+                    let sum = sum_arr.iter().sum::<f32>();
+
+                    _c[x * j + y] *= beta;
+                    _c[x * j + y] += alpha * sum;
+                }
+            }
+        }
+    } else {
+        for x in 0..i {
+            for y in 0..j {
+                let mut sum = 0.0;
+                for z in 0..k {
+                    sum += _a[x * k + z] * _b[y * k + z];
+                }
+                _c[x * j + y] *= beta;
+                _c[x * j + y] += alpha * sum;
+            }
+        }
+    }
+}
+
+// #[test]
+// fn test_gather() {
+//     // 创建一个示例 table 张量
+//     let table = Tensor::<f32>::new(
+//         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+//         &vec![2, 4],
+//     );
+
+//     // 创建一个示例 indices 张量
+//     let indices = Tensor::<u32>::new(vec![1, 0], &vec![2]);
+
+//     // 创建一个空的 y 张量，用于存储结果
+//     let mut y = Tensor::<f32>::new(vec![0.0; 8], &vec![2, 4]);
+
+//     // 调用 gather 函数
+//     gather(&mut y, &indices, &table);
+
+//     // 预期结果
+//     let expected = Tensor::<f32>::new(
+//         vec![5.0, 6.0, 7.0, 8.0, 1.0, 2.0, 3.0, 4.0],
+//         &vec![2, 4],
+//     );
+
+//     // 验证结果是否符合预期
+//     assert!(y.close_to(&expected, 1e-3));
+// }

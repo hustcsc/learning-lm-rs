@@ -22,14 +22,68 @@ pub struct LLamaParams<T> {
 
 impl LLamaParams<f32> {
     pub fn from_safetensors(safetensor: &SafeTensors, config: &LlamaConfigJson) -> Self {
-        todo!("实现从safetensors文件的模型参数加载");
+        // todo!("实现从safetensors文件的模型参数加载");
         // let get_tensor: impl Fn(&str) -> Tensor<f32> = |name: &str| {
         // ...    
         // };
+        // error[E0562]: `impl Trait` is not allowed in the type of variable bindings
+        // note: `impl Trait` is only allowed in arguments and return types of functions and methods
         
         // LLamaParams {
         //     embedding_table: get_tensor(...),
         //     ...
         // }
+
+        let get_tensor = |name: &str| -> Tensor<f32> {
+            let tensor = safetensor.tensor(name).unwrap();
+            let shape = tensor.shape().to_vec();
+            let data: Vec<f32> = tensor.data().chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+                .collect();
+            // fn new(data: Vec<T>, shape: &Vec<usize>) 
+            Tensor::new(data, &shape)
+        };
+
+        let n_layers = config.num_hidden_layers;
+        LLamaParams {
+            // token_id to embedding lookup table
+            embedding_table: if config.tie_word_embeddings {
+                get_tensor("lm_head.weight")
+            } else {
+                get_tensor("model.embed_tokens.weight")
+            },
+            // decoder layer
+            rms_att_w: (0..n_layers)
+                .map(|layer| get_tensor(&format!("model.layers.{layer}.input_layernorm.weight")))
+                .collect(),
+            wq: (0..n_layers)
+                .map(|layer| get_tensor(&format!("model.layers.{layer}.self_attn.q_proj.weight")))
+                .collect(),
+            wk: (0..n_layers)
+                .map(|layer| get_tensor(&format!("model.layers.{layer}.self_attn.k_proj.weight")))
+                .collect(),
+            wv: (0..n_layers)
+                .map(|layer| get_tensor(&format!("model.layers.{layer}.self_attn.v_proj.weight")))
+                .collect(),
+            wo: (0..n_layers)
+                .map(|layer| get_tensor(&format!("model.layers.{layer}.self_attn.o_proj.weight")))
+                .collect(),
+            // ffn layer
+            rms_ffn_w: (0..n_layers)
+                .map(|layer| get_tensor(&format!("model.layers.{layer}.post_attention_layernorm.weight")))
+                .collect(),
+            w_up: (0..n_layers)
+                .map(|layer| get_tensor(&format!("model.layers.{layer}.mlp.up_proj.weight")))
+                .collect(),
+            w_gate: (0..n_layers)
+                .map(|layer| get_tensor(&format!("model.layers.{layer}.mlp.gate_proj.weight")))
+                .collect(),
+            w_down: (0..n_layers)
+                .map(|layer| get_tensor(&format!("model.layers.{layer}.mlp.down_proj.weight")))
+                .collect(),
+            // output
+            rms_out_w: get_tensor("model.norm.weight"),
+            lm_head: get_tensor("lm_head.weight"),
+        }
     }
 }

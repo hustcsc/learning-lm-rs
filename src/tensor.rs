@@ -1,9 +1,9 @@
 use std::{slice, sync::Arc, vec};
 pub struct Tensor<T> {
-    data: Arc<Box<[T]>>,
-    shape: Vec<usize>,
-    offset: usize,
-    length: usize,
+    data: Arc<Box<[T]>>,  // 数据存储，使用 Arc 实现共享所有权
+    shape: Vec<usize>,     // 张量的形状（维度）
+    offset: usize,         // 数据在底层数组中的起始偏移量
+    length: usize,         // 数据的有效长度
 }
 
 impl<T: Copy + Clone + Default> Tensor<T> {
@@ -51,9 +51,30 @@ impl<T: Copy + Clone + Default> Tensor<T> {
         self
     }
 
+    pub fn transpose(&self) -> Self {
+        let old_shape = self.shape().clone();
+        let (row,col) = (old_shape[0],old_shape[1]);
+        let shape = vec![col,row];
+        let mut data = vec![T::default(); row * col];
+        for i in 0..row {
+            for j in 0..col {
+                data[j*row+i] = self.data()[i*col+j];
+            }
+        }
+        Tensor {
+            data:Arc::new(data.into_boxed_slice().try_into().unwrap()),
+            shape:shape.clone(),
+            offset:0,
+            length:self.length,
+        }
+    }
+
+
+
     pub fn slice(&self, start: usize, shape: &Vec<usize>) -> Self {
         let new_length: usize = shape.iter().product();
-        assert!(self.offset + start + new_length <= self.length);
+        // println!("offset:{}, start: {}, new_length: {:?}, length: {}", self.offset, start, new_length, self.length);
+        assert!(start + new_length <= self.length);
         Tensor {
             data: self.data.clone(),
             shape: shape.clone(),

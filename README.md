@@ -19,13 +19,17 @@
 
 ### 1. 算子：SiLU函数（10分）
 
-请在`src/operators.rs`中实现SiLU函数,其公式为：
+请在`src/operators.rs`中实现SwiGLU算子，其公式为：
 
 $$
-y=sigmoid(y) × y × x
+y=silu(x) × y
 $$
 
 其中
+
+$$
+silu(x) = sigmoid(x) × x
+$$
 
 $$
 sigmoid(x) = \frac{1}{1 + e^{-x}}
@@ -46,7 +50,7 @@ $$
 请在`src/operators.rs`中实现RMS Normalization，其公式为：
 
 $$
-y_i=\frac{w×x_i}{\sqrt{ \sum_{j} x_{ij}^2+\epsilon}}
+y_i=\frac{w×x_i}{\sqrt{ \frac{1}{n} \sum_{j} x_{ij}^2 +\epsilon}}
 $$
 
 注意：
@@ -81,9 +85,9 @@ $$
 hidden = rms_norm(residual)
 gate = hidden @ gate_weight.T
 up = hidden @ up_weight.T
-hidden = gate * sigmoid(gate) * up ## silu
-hidden = hidden @ down_weight.T
-residual = hidden + residual
+act = gate * sigmoid(gate) * up ## SwiGLU
+output = act @ down_weight.T
+residual = output + residual
 ```
 
 如果你正确地实现了之前地几个算子，那么这个函数的实现应该是相当简单的。需要注意的是，上一层的输出存储于residual这个临时张量中，这就是用到了我们之前提到的残差连接的概念，最终我们实现的神经网络的输出也要加上前一层的residual并存储于residual中，以便于下一层的计算。hidden_states则用于存储过程中的计算结果。你可以用`src/model.rs`中的测例检验你的实现是否正确。
@@ -145,9 +149,9 @@ V = cat(V_cache, V)
 ### 以下是你需要实现的部分
 score = Q @ K.T / sqrt(dim)
 attn = softmax(score)
-x = attn @ V
-x = x @ O_weight.T
-residual = x + residual
+attn_V = attn @ V
+out = attn_V @ O_weight.T
+residual = out + residual
 ```
 
 Self-Attention的调试是很困难的。这里推荐大家使用pytorch来辅助调试。各位可以用transformers库（使用llama模型代码）来加载模型并运行，逐层检查中间张量结果。
