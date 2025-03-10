@@ -7,7 +7,11 @@ use crate::operators as OP;
 use crate::operators::*;
 use crate::params::LLamaParams;
 use crate::tensor::Tensor;
+<<<<<<< HEAD
 use rayon::prelude::*;
+=======
+
+>>>>>>> cd422c626056dcdfc5984b50874ee6a3c7820a3a
 use safetensors::SafeTensors;
 use std::path::Path;
 
