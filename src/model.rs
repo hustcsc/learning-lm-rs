@@ -7,11 +7,6 @@ use crate::operators as OP;
 use crate::operators::*;
 use crate::params::LLamaParams;
 use crate::tensor::Tensor;
-<<<<<<< HEAD
-use rayon::prelude::*;
-=======
-
->>>>>>> cd422c626056dcdfc5984b50874ee6a3c7820a3a
 use safetensors::SafeTensors;
 use std::path::Path;
 
@@ -202,33 +197,82 @@ impl Llama<f32> {
 
 
 
-    pub fn chat_generate<'a>(
-        &'a self,
+    // pub fn chat_generate1<'a>(
+    //     &'a self,
+    //     token_ids: &[u32],
+    //     max_len: usize,
+    //     top_p: f32,
+    //     top_k: u32,
+    //     temperature: f32,
+    //     kvcache: &'a mut KVCache<f32>,
+    // ) -> impl Iterator<Item = u32> + 'a {
+
+    //     let mut result = Vec::<u32>::new();
+    //     let mut input = Tensor::<u32>::new(Vec::from(token_ids), &vec![1, result.len()]);
+
+    //     std::iter::from_fn(move ||  {
+    //         let output = OP::random_sample(&self.forward(&input, kvcache), top_p, top_k, temperature);
+    //         result.push(output);
+    //         input = Tensor::<u32>::new(Vec::from([output]), &vec![1, 1]);
+
+    //         if result.len() >= max_len || output == self.eos_token_id {
+    //             None
+    //         } else {
+    //             Some(output)
+    //         }
+    //     })
+    // }
+
+
+
+    pub fn chat_generate(
+        &self,
         token_ids: &[u32],
         max_len: usize,
         top_p: f32,
         top_k: u32,
         temperature: f32,
-        kvcache: &'a mut KVCache<f32>,
-    ) -> impl Iterator<Item = u32> + 'a {
-
-        let mut result = Vec::<u32>::new();
-        let mut input = Tensor::<u32>::new(Vec::from(token_ids), &vec![1, result.len()]);
-
-        std::iter::from_fn(move ||  {
-            let output = OP::random_sample(&self.forward(&input, kvcache), top_p, top_k, temperature);
-            result.push(output);
-            input = Tensor::<u32>::new(Vec::from([output]), &vec![1, 1]);
-
-            if result.len() >= max_len || output == self.eos_token_id {
-                None
+        kvcache: &mut KVCache<f32>,
+    ) -> Vec<u32> {
+        let mut result = vec![]; // 结果列表，初始化为 token_ids
+    
+        while result.len() <= max_len { // 避免超过 max_len
+            // 生成输入 token：第一步使用 token_ids，之后每次只输入上一个 token
+            let input_tokens = if result.len() == 0 {
+                token_ids.to_vec() // 初始 prompt 作为输入
             } else {
-                Some(output)
+                vec![*result.last().unwrap()] // 之后每次只输入上一个 token
+            };
+            let len = input_tokens.len();
+            let input = Tensor::<u32>::new(input_tokens, &vec![len]);
+    
+            // 执行前向计算
+            let logits = self.forward(&input, kvcache);
+            
+            // 采样得到新 token
+            let id = OP::random_sample(&logits, top_p, top_k, temperature);
+            result.push(id);
+    
+            // 终止条件：如果生成了 EOS（假设 EOS = 0）
+            if id == self.eos_token_id { 
+                break;
             }
-        })
+        }
+        result.pop(); // 去掉 EOS
+        result        
+        // todo!("Add new function to attach the model to the chatbot");
     }
 
+
+
+
+
+
 }
+
+
+
+
 fn self_attention(
     hidden_states: &mut Tensor<f32>, // (seq, n_kv_h * n_groups * dqkv)
     att_scores: &mut Tensor<f32>,    // (n_kv_h, n_groups, seq, total_seq)

@@ -256,7 +256,7 @@ fn test_matmul_transb() {
         1e-3
     ));
 }
-<<<<<<< HEAD
+
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 pub fn matmul_transb_avx(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
@@ -300,8 +300,7 @@ pub fn matmul_transb_avx(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Te
         }
     }
 }
-=======
->>>>>>> cd422c626056dcdfc5984b50874ee6a3c7820a3a
+
 
 // #[test]
 // fn test_gather() {
