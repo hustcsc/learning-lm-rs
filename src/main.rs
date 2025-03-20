@@ -117,7 +117,7 @@ pub fn chat(){
                                 //     30,   // top_k
                                 //     1.0,  // top_p
                                 // );
-                                let output_ids: Vec<u32> = llama.chat_generate(input_ids, 500, 0.9, 30, 1., &mut kvcache).into_iter().collect();
+                                let output_ids: Vec<u32> = llama.chat_generate(input_ids, 200, 0.9, 30, 1., &mut kvcache).into_iter().collect();
                                 // let output_ids : Vec<u32> = llama.generate(input_ids, 500, 0.8, 30, 1.0); // 保持原参数
                                 // // 解码输出
                                 // let assistant_response = tokenizer.decode(&output_ids, true).unwrap();
