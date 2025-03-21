@@ -272,64 +272,89 @@ impl Llama<f32> {
 
 
 
-
 fn self_attention(
     hidden_states: &mut Tensor<f32>, // (seq, n_kv_h * n_groups * dqkv)
     att_scores: &mut Tensor<f32>,    // (n_kv_h, n_groups, seq, total_seq)
     q: &Tensor<f32>,                 // (seq, n_kv_h * n_groups * dqkv)
     k: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv)
-    v: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv) or (n_kv_h * dqkv, total_seq)
+    v: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv)
     n_kv_h: usize,
     n_groups: usize,
     seq_len: usize,
     total_seq_len: usize,
     dqkv: usize,
 ) {
-    assert!(hidden_states.size() == q.size());
-    assert!(att_scores.size() == n_kv_h*n_groups*seq_len*total_seq_len);
-    let n_q_h = n_kv_h * n_groups;
-    let q_dim = n_q_h * dqkv;
-    let kv_dim = n_kv_h * dqkv;
-    let att_dim = n_q_h * total_seq_len;
-    let q_data = q.data();
-    let k_data = k.data();
-    //转置v矩阵，shape为(n_kv_h * dqkv, total_seq_len)
-    let v = v.transpose();
-    let v_data = v.data();
-    let att_data = unsafe { att_scores.data_mut() };
-    let hidden_data = unsafe { hidden_states.data_mut() };
-    
-    // 计算attention矩阵
-    // attention的shape为(seq_len, n_q_h * total_seq_len)
-    // query矩阵的每个head的shape为(seq_len, dqkv)
-    // key矩阵的每个head的shape为(total_seq_len, dqkv)
-    for h in 0..n_q_h {
-        for row in 0..seq_len {
-            for col in 0..total_seq_len {
-                let q_base = row * q_dim + h * dqkv;
-                let k_base = col * kv_dim + h/n_groups * dqkv;
-                att_data[row * att_dim + h * total_seq_len + col] = (0..dqkv).map(|d| q_data[q_base + d] * k_data[k_base + d]).sum::<f32>() / (dqkv as f32).sqrt();
-            }
-        }
-    }
-    OP::masked_softmax(att_scores);
+
+     let sqrt_dqkv = (dqkv as f32).sqrt();
+
+
      
-    let att = att_scores.data(); 
-    // attention的shape为(seq_len, n_q_h * total_seq_len)
-    // v的shape为(n_kv_h * dqkv, total_seq_len)
-    // attention的每个head的shape为(seq_len, total_seq_len)
-    //
-    for h in 0..n_q_h {
-        for row in 0..seq_len {
-            for col in 0..dqkv {
-                let a_base = row * att_dim + h * total_seq_len;
-                //let v_base = col + h/n_groups * dqkv;
-                let v_base = col * total_seq_len + h/n_groups * dqkv * total_seq_len;
-                hidden_data[row * q_dim + h * dqkv + col] = (0..total_seq_len).map(|d| att[a_base + d] * v_data[v_base + d]).sum::<f32>();
-            }
-        }
-    } 
-}
+     for i in 0..n_kv_h {
+         let k_start = i * dqkv;
+         let v_start = i * dqkv;
+         let mut k_head_data = Vec::with_capacity(total_seq_len * dqkv);
+         for t in 0..total_seq_len {
+             let start = t * (n_kv_h * dqkv) + k_start;
+             k_head_data.extend_from_slice(&k.data()[start..start + dqkv]);
+         }
+         let k_head = Tensor::new(k_head_data, &vec![total_seq_len, dqkv]);
+ 
+         // 将V的形状从(total_seq_len, n_kv_h * dqkv)重组为(total_seq_len, dqkv)
+         let mut v_head_data = Vec::with_capacity(total_seq_len * dqkv);
+         for t in 0..total_seq_len {
+             let start = t * (n_kv_h * dqkv) + v_start;
+             v_head_data.extend_from_slice(&v.data()[start..start + dqkv]);
+         }
+         let v_head = Tensor::new(v_head_data, &vec![total_seq_len, dqkv]);
+ 
+         // 对于当前KV头，遍历所有对应的Q组
+         for j in 0..n_groups {
+             let head_idx = i * n_groups + j;
+             let q_start = head_idx * dqkv;
+             let mut q_head_data = Vec::with_capacity(seq_len * dqkv);
+             for s in 0..seq_len {
+                 let start = s * (n_kv_h * n_groups * dqkv) + q_start;
+                 q_head_data.extend_from_slice(&q.data()[start..start + dqkv]);
+             }
+             let q_head = Tensor::new(q_head_data, &vec![seq_len, dqkv]);
+
+             let mut scores = Tensor::default(&vec![seq_len, total_seq_len]);
+             OP::matmul_transb(&mut scores, 0., &q_head, &k_head, 1.0 / sqrt_dqkv);
+             OP::masked_softmax(&mut scores);
+ 
+             // 计算注意力输出: (seq_len, total_seq_len) @ (total_seq_len, dqkv) -> (seq_len, dqkv)
+             let mut attn_v = Tensor::default(&vec![seq_len, dqkv]);
+             let scores_data = scores.data();
+             let v_head_data = v_head.data();
+             let attn_v_data = unsafe { attn_v.data_mut() };
+             
+             for s in 0..seq_len {
+                 for d in 0..dqkv {
+                     let mut sum = 0.0;
+                     for t in 0..total_seq_len {
+                         sum += scores_data[s * total_seq_len + t] * v_head_data[t * dqkv + d];
+                     }
+                     attn_v_data[s * dqkv + d] = sum;
+                 }
+             }
+ 
+             let offset = (i * n_groups + j) * (seq_len * total_seq_len);
+             unsafe {
+                 att_scores.data_mut()[offset..offset + seq_len * total_seq_len]
+                     .copy_from_slice(scores.data());
+             }
+
+             // hidden_states的形状是(seq_len, n_kv_h * n_groups * dqkv)
+             for s in 0..seq_len {
+                 let start = s * (n_kv_h * n_groups * dqkv) + q_start;
+                 unsafe {
+                     hidden_states.data_mut()[start..start + dqkv]
+                         .copy_from_slice(&attn_v.data()[s * dqkv..s * dqkv + dqkv]);
+                 }
+             }
+         }
+     }
+ }
 
 
 
